@@ -1,26 +1,60 @@
 <?php
-require __DIR__ . '/../vendor/autoload.php';
 
-use function Hidehalo\Nanoid\customAlphabet;
-use function Hidehalo\Nanoid\nanoid;
-use function Hidehalo\Nanoid\NonSecure\nanoid as nonSecureNanoid;
+$target = getenv('NANOID_BENCH_TARGET') ?: 'current';
+$implementation = getenv('NANOID_BENCH_LABEL') ?: null;
+
+if ($target === 'current') {
+    $autoload = getenv('NANOID_BENCH_AUTOLOAD') ?: __DIR__ . '/../vendor/autoload.php';
+    if (!is_file($autoload)) {
+        throw new RuntimeException('Composer autoload file not found: ' . $autoload);
+    }
+    require $autoload;
+
+    $custom = \Hidehalo\Nanoid\customAlphabet('abcdefghijklmnopqrstuvwxyz', 21);
+    $cases = [
+        'secure_url_21' => static function () {
+            return \Hidehalo\Nanoid\nanoid();
+        },
+        'secure_custom_26x21' => static function () use ($custom) {
+            return $custom();
+        },
+        'non_secure_url_21' => static function () {
+            return \Hidehalo\Nanoid\NonSecure\nanoid();
+        },
+    ];
+    $implementation = $implementation ?: 'jooosi-project/nanoid-php';
+} elseif ($target === 'hidehalo') {
+    $legacyDirectory = getenv('NANOID_BENCH_LEGACY_DIR');
+    if (!$legacyDirectory || !is_dir($legacyDirectory . '/src')) {
+        throw new RuntimeException('Set NANOID_BENCH_LEGACY_DIR to the Hidehalo Nano ID checkout.');
+    }
+
+    require $legacyDirectory . '/src/GeneratorInterface.php';
+    require $legacyDirectory . '/src/CoreInterface.php';
+    require $legacyDirectory . '/src/Core.php';
+    require $legacyDirectory . '/src/Generator.php';
+    require $legacyDirectory . '/src/Client.php';
+
+    $client = new \Hidehalo\Nanoid\Client(21);
+    $cases = [
+        'secure_url_21' => static function () use ($client) {
+            return $client->generateId(21, \Hidehalo\Nanoid\Client::MODE_DYNAMIC);
+        },
+        'secure_custom_26x21' => static function () use ($client) {
+            return $client->formattedId('abcdefghijklmnopqrstuvwxyz', 21);
+        },
+        'non_secure_url_21' => static function () use ($client) {
+            return $client->generateId(21, \Hidehalo\Nanoid\Client::MODE_NORMAL);
+        },
+    ];
+    $implementation = $implementation ?: 'hidehalo/nanoid-php';
+} else {
+    throw new InvalidArgumentException('NANOID_BENCH_TARGET must be "current" or "hidehalo".');
+}
 
 $iterations = max(1, (int) (getenv('NANOID_BENCH_ITERATIONS') ?: 100000));
 $repetitions = max(1, (int) (getenv('NANOID_BENCH_REPETITIONS') ?: 7));
 $warmupIterations = min(3000, $iterations);
-$custom = customAlphabet('abcdefghijklmnopqrstuvwxyz', 21);
-
-$cases = [
-    'secure_url_21' => static function () {
-        return nanoid();
-    },
-    'secure_custom_26x21' => static function () use ($custom) {
-        return $custom();
-    },
-    'non_secure_url_21' => static function () {
-        return nonSecureNanoid();
-    },
-];
 
 gc_disable();
 $results = [];
@@ -43,7 +77,10 @@ foreach ($cases as $name => $generate) {
     }
 
     sort($samples);
-    $medianSeconds = $samples[(int) floor(count($samples) / 2)];
+    $middle = (int) floor(count($samples) / 2);
+    $medianSeconds = count($samples) % 2 === 0
+        ? ($samples[$middle - 1] + $samples[$middle]) / 2
+        : $samples[$middle];
     $results[$name] = [
         'median_ids_per_second' => $iterations / $medianSeconds,
         'median_microseconds_per_id' => ($medianSeconds * 1e6) / $iterations,
@@ -55,7 +92,8 @@ foreach ($cases as $name => $generate) {
 }
 
 echo json_encode([
-    'implementation' => 'hidehalo/nanoid-php 2.x function API',
+    'implementation' => $implementation,
+    'target' => $target,
     'php_version' => PHP_VERSION,
     'iterations_per_round' => $iterations,
     'repetitions' => $repetitions,

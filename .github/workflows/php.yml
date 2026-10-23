@@ -1,49 +1,104 @@
-name: PHP Composer
+name: PHP CI
 
 on:
   push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  test:
+    name: PHP ${{ matrix.php-version }} on ${{ matrix.operating-system }}
     runs-on: ${{ matrix.operating-system }}
     strategy:
+      fail-fast: false
       matrix:
-        operating-system: ['ubuntu-latest', 'macos-latest']
-        php-versions: ['7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
-        phpunit-versions: ['latest']
+        operating-system: [ubuntu-latest, macos-latest]
+        php-version: ['8.3', '8.4', '8.5']
 
     steps:
-      - name: Setup PHP
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php-versions }}
-          ini-values: post_max_size=256M, max_execution_time=180
-          coverage: xdebug
-          tools: phpunit:${{ matrix.phpunit-versions }}
-
-      - uses: actions/checkout@v3
-
-      - name: Get Composer Cache Directory
-        id: composer-cache
-        run: |
-          echo "::set-output name=dir::$(composer config cache-files-dir)"
-
-      - uses: actions/cache@v3
-        with:
-          path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
+          php-version: ${{ matrix.php-version }}
+          tools: composer:v2
+          coverage: none
 
       - name: Install dependencies
-        run: |
-          curl -sS https://getcomposer.org/installer | php
-          mv composer.phar /usr/local/bin/composer
-          composer self-update
-          composer install --prefer-dist --no-progress
+        run: composer install --prefer-dist --no-interaction --no-progress
 
-      - name: PHPUnit
-        run: XDEBUG_MODE=coverage vendor/bin/phpunit -d memory_limit=1024M --coverage-text
+      - name: Run PHPUnit
+        run: composer test
+
+  benchmark:
+    name: Benchmark vs latest Hidehalo release
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install runtime dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+
+      - name: Fetch latest Hidehalo release
+        id: hidehalo
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="$(curl --fail --silent --show-error https://api.github.com/repos/hidehalo/nanoid-php/releases/latest | jq --exit-status --raw-output '.tag_name')"
+          if [[ ! "$ref" =~ ^v?[0-9]+([.][0-9]+){1,2}$ ]]; then
+            echo "Unexpected Hidehalo release tag: $ref" >&2
+            exit 1
+          fi
+
+          checkout_dir="$RUNNER_TEMP/hidehalo-nanoid-php"
+          git clone --quiet --depth 1 --branch "$ref" https://github.com/hidehalo/nanoid-php.git "$checkout_dir"
+          sha="$(git -C "$checkout_dir" rev-parse --short=12 HEAD)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Benchmark both implementations
+        env:
+          NANOID_BENCH_ITERATIONS: '100000'
+          NANOID_BENCH_REPETITIONS: '7'
+          HIDEHALO_REF: ${{ steps.hidehalo.outputs.ref }}
+          HIDEHALO_SHA: ${{ steps.hidehalo.outputs.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          result_dir="$RUNNER_TEMP/nanoid-benchmark"
+          mkdir -p "$result_dir"
+
+          NANOID_BENCH_TARGET=current \
+          NANOID_BENCH_LABEL="jooosi-project/nanoid-php @ $CURRENT_SHA" \
+          php benchmark/benchmark.php > "$result_dir/current.json"
+
+          NANOID_BENCH_TARGET=hidehalo \
+          NANOID_BENCH_LABEL="hidehalo/nanoid-php $HIDEHALO_REF" \
+          NANOID_BENCH_LEGACY_DIR="$RUNNER_TEMP/hidehalo-nanoid-php" \
+          php benchmark/benchmark.php > "$result_dir/hidehalo.json"
+
+          php benchmark/compare.php \
+            "$result_dir/current.json" \
+            "$result_dir/hidehalo.json" \
+            "$HIDEHALO_REF" \
+            "$HIDEHALO_SHA" \
+            "$CURRENT_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
