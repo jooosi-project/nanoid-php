@@ -1,29 +1,11 @@
 <?php
 require __DIR__.'/../vendor/autoload.php';
 
-use Hidehalo\Nanoid\Client;
-use Hidehalo\Nanoid\GeneratorInterface;
+use function Hidehalo\Nanoid\{customAlphabet, customRandom, random};
 
-class DummyGenerator implements GeneratorInterface
-{
-    /**
-     * @inheritDoc
-     */
-    public function random($size)
-    {
-        $ret = [];
-        while ($size--) {
-            $ret[] = mt_rand(0, 255);
-        }
-
-        return $ret;
-    }
-}
-
-$nano = new Client();
 $alphabet = '0123456789';
-$nanoId = $nano->formattedId($alphabet, 10);
-$dummyId = $nano->formattedId($alphabet, 10, new DummyGenerator);
+$generate = customAlphabet($alphabet, 10);
+$customRandomId = customRandom($alphabet, 10, random(...));
 
-printf("Default nano ID: %s\n", $nanoId);
-printf("Formatted nano ID: %s\n", $dummyId);
+printf("Custom alphabet ID: %s\n", $generate());
+printf("Custom random ID: %s\n", $customRandomId());

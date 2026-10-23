@@ -1,108 +1,95 @@
-# Nanoid-php
+# Nano ID for PHP
 
-[![Build Status](https://travis-ci.org/hidehalo/emoji.svg)](https://travis-ci.org/hidehalo/nanoid-php)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fhidehalo%2Fnanoid-php.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fhidehalo%2Fnanoid-php?ref=badge_shield)
+[Nano ID](https://github.com/ai/nanoid/tree/6.0.2) is a small, secure, URL-friendly string ID generator. This package is a PHP port of Nano ID **6.0.2**.
 
-> A tiny (179 bytes), secure URL-friendly unique string ID generator for JavaScript
->
-> **Safe.** It uses cryptographically strong random APIs and guarantees a proper distribution of symbols.
->
-> **Small.** Only 179 bytes (minified and gzipped). No dependencies. It uses Size Limit to control size.
->
-> **Compact.** It uses more symbols than UUID (A-Za-z0-9_\-) and has the same number of unique options in just 21 symbols instead of 36.
+- Secure IDs use `random_bytes()` and unbiased sampling.
+- `nanoid()` returns a 21-character ID by default, with collision resistance similar to UUID v4.
+- Custom alphabets, sizes, and random-byte sources are supported.
+- A separate non-secure API is available when unpredictability is not needed.
 
-Thanks awesome [ai](https://github.com/ai) and his [nanoid](https://github.com/ai/nanoid), this package is a copy in PHP!
-If you like nanoid and you want to use it in PHP, try me :D
+## Requirements
+
+PHP 8.3 or later.
 
 ## Install
 
-Via Composer
+This fork is hosted at [jooosi-project/nanoid-php](https://github.com/jooosi-project/nanoid-php). Until the fork has its own Composer package name, it retains the `hidehalo/nanoid-php` name from its source project. To install this repository's current `main` branch, add it as a VCS repository:
 
-``` bash
-composer require hidehalo/nanoid-php
+```sh
+composer config repositories.jooosi-nanoid vcs https://github.com/jooosi-project/nanoid-php
+composer require hidehalo/nanoid-php:dev-main
 ```
 
-## Usage
+## Generate an ID
 
-### Normal
+```php
+use function Hidehalo\Nanoid\nanoid;
 
-> The main module uses URL-friendly symbols (A-Za-z0-9_\-) and returns an ID with 21 characters (to have the same collisions probability as UUID v4).
-
-``` php
-use Hidehalo\Nanoid\Client;
-use Hidehalo\Nanoid\GeneratorInterface;
-
-$client = new Client();
-
-# default random generator
-echo $client->generateId($size = 21);
-# more safer random generator
-echo $client->generateId($size = 21, $mode = Client::MODE_DYNAMIC);
+echo nanoid();   // 21 characters
+echo nanoid(10); // 10 characters
+echo nanoid(0);  // empty string
 ```
 
-### Custom Alphabet or Length
+Negative sizes throw `RangeException`.
 
-``` php
-echo $client->formattedId($alphabet = '0123456789abcdefg', $size = 21);
+## Custom alphabet
+
+`customAlphabet()` returns a generator. Its second argument sets the default length; pass a length to the returned generator to override it. Secure alphabets can contain 1 to 256 Unicode code points.
+
+```php
+use const Hidehalo\Nanoid\URL_ALPHABET;
+use function Hidehalo\Nanoid\customAlphabet;
+
+$hexId = customAlphabet('0123456789abcdef', 12);
+echo $hexId();   // 12 characters
+echo $hexId(6);  // 6 characters
+
+$urlId = customAlphabet(URL_ALPHABET, 10);
+echo $urlId();
 ```
 
-> Alphabet must contain 256 symbols or less.
-> Otherwise, the generator will not be secure.
+## Custom random source
 
-### Custom Random Bytes Generator
+`customRandom()` takes a callback that receives a byte count and returns at least that many raw bytes as a binary PHP string. The built-in `random()` helper returns cryptographically strong bytes.
 
-``` php
-# PS: anonymous class is new feature when PHP_VERSION >= 7.0
-echo $client->formattedId($alphabet = '0123456789abcdefg', $size = 21,
-new class implements GeneratorInterface {
-    /**
-     * @inheritDoc
-     */
-    public function random($size)
-    {
-        //TODO: implemenation ...
-    }
-});
+```php
+use function Hidehalo\Nanoid\{customRandom, random};
+
+$generate = customRandom('0123456789abcdef', 12, random(...));
+echo $generate();
 ```
 
-> `random` callback must accept the array size and return an array with random numbers.
->
-> If you want to use the same URL-friendly symbols with `format`,
-> you can get default alphabet from the `url` module:
+## Non-secure IDs
 
-Please see [`CoreInterface::random(...)`](src/CoreInterface.php) for the core random API prototype and notes
+The separate `NonSecure` namespace uses `mt_rand()` and is not suitable for security-sensitive IDs.
 
-## Examples
+```php
+use function Hidehalo\Nanoid\NonSecure\nanoid as nonSecureNanoid;
 
-Please see [Examples](examples) for more information on detailed usage.
-
-## Change log
-
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
-
-## Testing
-
-``` bash
-composer test
+echo nonSecureNanoid();
 ```
 
-## Contributing
+## Difference from `hidehalo/nanoid-php` and migration
 
-Please see [CONTRIBUTING](CONTRIBUTING.md) and [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) for details.
+This repository is a fork of [`hidehalo/nanoid-php`](https://github.com/hidehalo/nanoid-php). It keeps the `Hidehalo\Nanoid` PHP namespace and Composer package name, but updates the implementation to Nano ID 6.0.2 and replaces the old `Client`, `Core`, and `GeneratorInterface` class API with functions.
 
-## Notice
+The old `Client::MODE_DYNAMIC` was secure; use `nanoid()` for the same intent. The old default `Client::MODE_NORMAL` used `mt_rand()`; use `NonSecure\nanoid()` when you intentionally want non-secure IDs. Custom ID generation moves from `formattedId()` / `formatedId()` to `customAlphabet()`:
 
-If you have any issues, just feel free and open it in this repository, thx!
+```php
+// Before
+$client->formattedId('0123456789abcdef', 12);
 
-## Credits
+// Now
+$generate = customAlphabet('0123456789abcdef', 12);
+$id = $generate();
+```
 
-- [ai](https://github.com/ai)
-- [hidehalo](https://github.com/hidehalo)
-- [All Contributors](https://github.com/hidehalo/nanoid-php/graphs/contributors)
+For a custom random source, replace a `GeneratorInterface` implementation (which returned an array of byte values) with a callback that returns raw bytes as a binary string, passed to `customRandom()`. Also note that this fork requires PHP 8.3+, and a size of `0` now returns an empty string; the old client treated non-positive sizes as the default size.
 
-## License
+## Examples and changelog
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+See the [examples](examples) directory and [changelog](CHANGELOG.md).
 
+## Credits and license
 
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fhidehalo%2Fnanoid-php.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fhidehalo%2Fnanoid-php?ref=badge_large)
+Based on [ai/nanoid](https://github.com/ai/nanoid) and forked from [hidehalo/nanoid-php](https://github.com/hidehalo/nanoid-php). MIT licensed; see [LICENSE.md](LICENSE.md).

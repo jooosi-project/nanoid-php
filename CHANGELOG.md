@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0] - Unreleased
+
+### Breaking changes
+
+- Require PHP 8.3 or later.
+- Remove the legacy `Client`, `Core`, and generator-interface APIs. Use the function-based API instead.
+
+### Added
+
+- Add Nano ID 6.0.2-style namespaced functions as the recommended public API.
+- Add `customRandom()`, `random()`, and a separate non-secure API under the `NonSecure` namespace.
+- Define `random()` as returning raw binary bytes; `customRandom()` callbacks also return binary strings.
+- Make `nanoid(0)` return an empty string and throw `RangeException` for negative secure sizes.
+
+### Changed
+
+- Port Nano ID 6.0.2's pooled `nanoid()` and `customAlphabet()` algorithm, rejection sampling, and URL alphabet.
+
 ## [1.1.2] - 2018-08-14
 
 ### Changed
