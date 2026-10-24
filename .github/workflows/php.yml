@@ -40,13 +40,15 @@ jobs:
         run: composer test
 
   benchmark:
-    name: Benchmark vs latest Hidehalo release
+    name: Benchmark vs previous commit and latest Hidehalo release
     runs-on: ubuntu-latest
     needs: test
 
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -57,6 +59,63 @@ jobs:
 
       - name: Install runtime dependencies
         run: composer install --no-dev --prefer-dist --no-interaction --no-progress
+
+      - name: Resolve previous revision
+        id: previous
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" && -n "$PR_BASE_SHA" ]]; then
+            candidate="$PR_BASE_SHA"
+          elif [[ "$EVENT_NAME" == "push" && "$PUSH_BEFORE" =~ ^[0-9a-f]{40}$ && "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            candidate="$PUSH_BEFORE"
+          else
+            candidate="$(git rev-parse "${CURRENT_SHA}^" 2>/dev/null || true)"
+          fi
+
+          if [[ -z "$candidate" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No previous revision is available; the history benchmark will be skipped."
+            exit 0
+          fi
+
+          if [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Could not resolve a valid previous revision; the history benchmark will be skipped."
+            exit 0
+          fi
+
+          previous_sha="$candidate"
+          if [[ "$previous_sha" == "$CURRENT_SHA" ]]; then
+            previous_sha="$(git rev-parse "${CURRENT_SHA}^" 2>/dev/null || true)"
+          fi
+
+          if [[ -z "$previous_sha" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No parent revision is available; the history benchmark will be skipped."
+            exit 0
+          fi
+
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$previous_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out previous revision
+        if: steps.previous.outputs.available == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.previous.outputs.sha }}
+          path: previous
+          fetch-depth: 1
+
+      - name: Install previous revision runtime dependencies
+        if: steps.previous.outputs.available == 'true'
+        run: composer install --working-dir="$GITHUB_WORKSPACE/previous" --no-dev --prefer-dist --no-interaction --no-progress
 
       - name: Fetch latest Hidehalo release
         id: hidehalo
@@ -75,13 +134,15 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Benchmark both implementations
+      - name: Benchmark current, previous, and Hidehalo implementations
         env:
           NANOID_BENCH_ITERATIONS: '100000'
           NANOID_BENCH_REPETITIONS: '7'
           HIDEHALO_REF: ${{ steps.hidehalo.outputs.ref }}
           HIDEHALO_SHA: ${{ steps.hidehalo.outputs.sha }}
           CURRENT_SHA: ${{ github.sha }}
+          PREVIOUS_AVAILABLE: ${{ steps.previous.outputs.available }}
+          PREVIOUS_SHA: ${{ steps.previous.outputs.sha }}
         run: |
           set -euo pipefail
           result_dir="$RUNNER_TEMP/nanoid-benchmark"
@@ -91,14 +152,27 @@ jobs:
           NANOID_BENCH_LABEL="jooosi-project/nanoid-php @ $CURRENT_SHA" \
           php benchmark/benchmark.php > "$result_dir/current.json"
 
+          if [[ "$PREVIOUS_AVAILABLE" == "true" ]]; then
+            NANOID_BENCH_TARGET=current \
+          NANOID_BENCH_LABEL="jooosi-project/nanoid-php previous revision" \
+            NANOID_BENCH_AUTOLOAD="$GITHUB_WORKSPACE/previous/vendor/autoload.php" \
+            php benchmark/benchmark.php > "$result_dir/previous.json"
+          fi
+
           NANOID_BENCH_TARGET=hidehalo \
           NANOID_BENCH_LABEL="hidehalo/nanoid-php $HIDEHALO_REF" \
           NANOID_BENCH_LEGACY_DIR="$RUNNER_TEMP/hidehalo-nanoid-php" \
           php benchmark/benchmark.php > "$result_dir/hidehalo.json"
 
-          php benchmark/compare.php \
-            "$result_dir/current.json" \
-            "$result_dir/hidehalo.json" \
-            "$HIDEHALO_REF" \
-            "$HIDEHALO_SHA" \
-            "$CURRENT_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          compare_args=(
+            "$result_dir/current.json"
+            "$result_dir/hidehalo.json"
+            "$HIDEHALO_REF"
+            "$HIDEHALO_SHA"
+            "$CURRENT_SHA"
+          )
+          if [[ "$PREVIOUS_AVAILABLE" == "true" ]]; then
+            compare_args+=("$result_dir/previous.json")
+          fi
+
+          php benchmark/compare.php "${compare_args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
