@@ -88,6 +88,14 @@ For a custom random source, replace a `GeneratorInterface` implementation (which
 
 ## Examples and changelog
 
+After installing dependencies with Composer, run an example from the repository root:
+
+```sh
+php examples/basic_usage.php
+php examples/custom_alphabet.php
+php examples/non_secure_usage.php
+```
+
 See the [examples](examples) directory and [changelog](CHANGELOG.md).
 
 ## Credits and license

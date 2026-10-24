@@ -7,7 +7,7 @@ use const Hidehalo\Nanoid\URL_ALPHABET;
 /**
  * Create a non-secure ID generator using mt_rand().
  *
- * @return callable(int|null): string
+ * @return \Closure(int|null=): string
  */
 function customAlphabet(string $alphabet, int $defaultSize = 21): \Closure
 {

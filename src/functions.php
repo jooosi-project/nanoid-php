@@ -28,7 +28,7 @@ function random(int $bytes): string
  * The callback receives a byte count and must return that many raw bytes in
  * a binary PHP string.
  *
- * @return callable(int|null): string
+ * @return \Closure(int|null=): string
  */
 function customRandom(string $alphabet, int $defaultSize, callable $getRandom): \Closure
 {
@@ -49,7 +49,7 @@ function customRandom(string $alphabet, int $defaultSize, callable $getRandom): 
  * ASCII alphabets use the pooled fast path. Other valid UTF-8 alphabets use
  * rejection sampling through the generic custom-random path.
  *
- * @return callable(int|null): string
+ * @return \Closure(int|null=): string
  */
 function customAlphabet(string $alphabet, int $defaultSize = 21): \Closure
 {
